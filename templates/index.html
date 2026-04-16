@@ -75,13 +75,16 @@ img#stereonet.loading {
 
 <div id="stereonet-container">
   <!-- <div id="stereonet-loading-msg">loading...</div> -->
-  <img id="stereonet" src="/stereonet.png?measurements=0" style="width: 100%" />
+  <img id="stereonet" src="/stereonet.svg?server_epoch={{ server_epoch }}" style="width: 100%" />
 </div>
 
 <script>
 /**
  * Initialization
  */
+
+ var updateTimer = null
+var imageCache = {}
 
 var MEASUREMENT_OPTIONS = {{ measurement_options | tojson }} // : {[locName: string]: Array<{ id: string, label: string, type: string }>}
 
@@ -289,36 +292,43 @@ function updateMeasurementTypes(newState) {
 
 // update stereonet to given JSON state
 var loading = false, queued
-function updateStereonet(newState /* : {[name: string]: {[id: number]: 1}} */) {
+function updateStereonet(newState) {
   var params = []
   for (var name in newState) {
     params.push(name + ':' + Object.keys(newState[name]).join(','))
   }
+
   var url = '/stereonet.svg?server_epoch={{ server_epoch }}&measurements=' + params.join('/')
-  if (!poles_only.checked) {
-    url += '&planes=true'
-  }
-  if (density_contours.checked) {
-    url += '&density_contours=true'
-  }
-  if (mean_plane.checked) {
-    url += '&mean_plane=true'
-  }
-  if (loading) {
-    queued = url
-  } else {
-    stereonet.src = url
-    if (!stereonet.complete) {
-      stereonet.className = 'loading'
-      loading = true
+
+  if (!poles_only.checked) url += '&planes=true'
+  if (density_contours.checked) url += '&density_contours=true'
+  if (mean_plane.checked) url += '&mean_plane=true'
+
+  clearTimeout(updateTimer)
+  updateTimer = setTimeout(function() {
+    if (stereonet.src === url) return
+
+    if (imageCache[url]) {
+      stereonet.src = imageCache[url]
+      stereonet.className = ''
+      loading = false
+      return
     }
-  }
+
+    stereonet.className = 'loading'
+    loading = true
+    stereonet.src = url
+  }, 150)
 }
 
 // remove loading indicator whenever stereonet finishes loading;
 // this is here rather than with event handlers because it's
 // conceptually like `await`-ing the load event
 stereonet.addEventListener('load', function() {
+  if (stereonet.src) {
+    imageCache[stereonet.src] = stereonet.src
+  }
+
   if (queued) {
     stereonet.src = queued
     queued = undefined
