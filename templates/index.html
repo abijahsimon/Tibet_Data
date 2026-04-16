@@ -1,7 +1,18 @@
 <style>
-h2 {
-  margin-top: 2em;
-  margin-left: 1em
+
+body {
+  font-family: Arial, sans-serif;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 1.5em;
+}
+
+select, button, input {
+  font-size: 14px;
+}
+
+h2, h3 {
+  margin-top: 0;
 }
 
 p {
@@ -23,16 +34,17 @@ p {
 }
 #stereonet-loading-msg {
   position: absolute;
-  z-index: -1;
+  z-index: 1;
   width: 100%;
   top: 50%;
   transform: translateY(-50%);
-
   text-align: center;
-  font-size: 80pt;
-  font-size: calc((100vw - 460px)/6);
+  font-size: 32pt;
   color: gray;
+  pointer-events: none;
+  display: none;
 }
+
 img#stereonet.loading {
   opacity: 0.8;
 }
@@ -44,6 +56,7 @@ img#stereonet.loading {
 
 <div style="display: inline-block; vertical-align: top; width: 220px; margin-right: 3em; margin-left: 1.5em">
   <h3><b>Location ID</b></h3>
+  <input id="loc-search" type="text" placeholder="Search Location ID..." style="width: 100%; margin-bottom: 0.75em;" />
   <select id="locs" multiple size="36" autofocus>
   {% for name, label in loc_options %}
     <option value="{{ name }}">{{ label }}</option>
@@ -74,7 +87,7 @@ img#stereonet.loading {
 </div>
 
 <div id="stereonet-container">
-  <!-- <div id="stereonet-loading-msg">loading...</div> -->
+  <div id="stereonet-loading-msg">loading...</div>
   <img id="stereonet" src="/stereonet.svg?server_epoch={{ server_epoch }}" style="width: 100%" />
 </div>
 
@@ -337,4 +350,22 @@ stereonet.addEventListener('load', function() {
     loading = false
   }
 })
+
+document.getElementById('loc-search').addEventListener('input', function() {
+  var q = this.value.toLowerCase()
+  Array.from(locs.options).forEach(function(opt) {
+    var match = opt.text.toLowerCase().includes(q)
+    opt.style.display = match ? '' : 'none'
+  })
+})
+
+function showLoading() {
+  document.getElementById('stereonet-loading-msg').style.display = 'block'
+  stereonet.className = 'loading'
+}
+
+function hideLoading() {
+  document.getElementById('stereonet-loading-msg').style.display = 'none'
+  stereonet.className = ''
+}
 </script>
