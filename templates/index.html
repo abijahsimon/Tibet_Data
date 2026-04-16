@@ -1,0 +1,330 @@
+<style>
+h2 {
+  margin-top: 2em;
+  margin-left: 1em
+}
+
+p {
+  margin-top: 0.5em;
+  margin-left: 1.5em
+}
+
+#measurement_types {
+  margin-bottom: 1em;
+}
+
+#stereonet-container {
+  display: inline-block;
+  vertical-align: top;
+  width: 600px;
+  width: calc(100vw - 460px - 9em);
+
+  position: relative;
+}
+#stereonet-loading-msg {
+  position: absolute;
+  z-index: -1;
+  width: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+
+  text-align: center;
+  font-size: 80pt;
+  font-size: calc((100vw - 460px)/6);
+  color: gray;
+}
+img#stereonet.loading {
+  opacity: 0.8;
+}
+</style>
+
+<h2> Field Measurements of Eastern Tibet</h2>
+
+<p> Choose measurements to place on stereonet (Cmd-click to select more than one, Cmd-A to select all, Shift-click to select a range):</p>
+
+<div style="display: inline-block; vertical-align: top; width: 220px; margin-right: 3em; margin-left: 1.5em">
+  <h3><b>Location ID</b></h3>
+  <select id="locs" multiple size="36" autofocus>
+  {% for name, label in loc_options %}
+    <option value="{{ name }}">{{ label }}</option>
+  {% endfor %}
+  </select>
+</div>
+
+<div style="display: inline-block; vertical-align: top; width: 215px;  margin-right: 1em">
+  <h3>Measurements</h3>
+  <div id="measurement_types"></div>
+  <button id="all">Select All</button></br></br>
+  <!-- <h3>Stereonet Plotting Options</h3> -->
+  <hr/>
+ 
+  <b>Plotting Options</b></br>
+  <div style="margin-bottom: 1em">
+    <label><input id="poles_only" type="checkbox" /> Poles Only</label><br/>
+    <label><input id="density_contours" type="checkbox" /> Density Contours</label><br/>
+    <label><input id="mean_plane" type="checkbox" /> Mean Plane</label><br/>
+  </div>
+
+</br>
+<br>
+  <b>Measurements at Location ID</br></br></b>
+  <select id="measurements" multiple size="20" style="width: 100%"></select>
+  <p style="width: 150px">Undo with Cmd-Z, Redo with Cmd-Y or Cmd-Shift-Z</p>
+
+</div>
+
+<div id="stereonet-container">
+  <!-- <div id="stereonet-loading-msg">loading...</div> -->
+  <img id="stereonet" src="/stereonet.png?measurements=0" style="width: 100%" />
+</div>
+
+<script>
+/**
+ * Initialization
+ */
+
+var MEASUREMENT_OPTIONS = {{ measurement_options | tojson }} // : {[locName: string]: Array<{ id: string, label: string, type: string }>}
+
+var selectionState = {} // {[locName: string]: {[measurementId: number]: 1}}
+!function() {
+  var initMeas = selectionState['{{ loc_options[0][0] }}'] = {}
+  for (var i = 0; i < MEASUREMENT_OPTIONS['{{ loc_options[0][0] }}'].length; i += 1) {
+    initMeas[i] = 1
+  }
+}()
+setState(selectionState)
+
+
+
+/**
+ * Event Handlers
+ */
+
+// on Cmd-Z/Y, Undo/Redo
+var undoStack = [selectionState], redoStack = []
+document.addEventListener('keydown', function(e) {
+  var chord = (e.metaKey ? 'Cmd-' : '') + (e.ctrlKey ? 'Ctrl-' : '')
+    + (e.altKey ? 'Alt-' : '') + (e.shiftKey ? 'Shift-' : '') + e.key
+  if (chord === 'Cmd-z') {
+    e.preventDefault()
+    if (undoStack.length > 1) {
+      redoStack.push(undoStack.pop())
+      setState(undoStack.slice(-1)[0])
+    }
+  } else if (chord === 'Cmd-Shift-z' || chord === 'Cmd-y') {
+    e.preventDefault()
+    if (redoStack.length) {
+      undoStack.push(redoStack.pop())
+      setState(undoStack.slice(-1)[0])
+    }
+  }
+})
+
+// when locality selection changes, update measurements multi-select and stereonet
+locs.addEventListener('input', function() {
+  var newState = {}
+  Array.from(locs.selectedOptions).forEach(function(opt) {
+    var locName = opt.value
+    if (selectionState[locName]) {
+      newState[locName] = selectionState[locName]
+    } else {
+      var newMeas = newState[locName] = {}
+      for (var i = 0; i < MEASUREMENT_OPTIONS[locName].length; i += 1) {
+        newMeas[i] = 1
+      }
+    }
+  })
+  setState(newState)
+  if (JSON.stringify(selectionState) !== JSON.stringify(undoStack.slice(-1)[0])) {
+    undoStack.push(selectionState)
+    redoStack = []
+  }
+})
+
+// when measurements selection changes, update stereonet
+measurements.addEventListener('input', function() {
+  selectionState = getMeasurements()
+  updateMeasurementTypes(selectionState)
+  updateStereonet(selectionState)
+  if (JSON.stringify(selectionState) !== JSON.stringify(undoStack.slice(-1)[0])) {
+    undoStack.push(selectionState)
+    redoStack = []
+  }
+})
+
+// button to select all measurements
+document.getElementById('all').addEventListener('click', function() {
+  var newState = {}
+  for (var locName in selectionState) {
+    var newMeas = newState[locName] = {}
+    for (var i = 0; i < MEASUREMENT_OPTIONS[locName].length; i += 1) {
+      newMeas[i] = 1
+    }
+  }
+  setState(newState)
+  if (JSON.stringify(selectionState) !== JSON.stringify(undoStack.slice(-1)[0])) {
+    undoStack.push(selectionState)
+    redoStack = []
+  }
+})
+
+// checkboxes to select/unselect all measurements of a type
+measurement_types.addEventListener('input', function(e) {
+  var newState = {}
+  for (var locName in selectionState) {
+    var newMeas = newState[locName] = {}
+    var measOpts = MEASUREMENT_OPTIONS[locName] // : Array<{ id: string, label: string, type: string }>
+    for (var i = 0; i < measOpts.length; i += 1) {
+      var m = measOpts[i]
+      if (m.type === e.target.value) {
+        if (e.target.checked) newMeas[i] = 1
+      } else if (selectionState[locName][i]) {
+        newMeas[i] = 1
+      }
+    }
+  }
+  setState(newState)
+  if (JSON.stringify(selectionState) !== JSON.stringify(undoStack.slice(-1)[0])) {
+    undoStack.push(selectionState)
+    redoStack = []
+  }
+})
+
+// when plotting options change, update stereonet
+poles_only.addEventListener('input', function(e) {
+  console.log('asdf')
+  updateStereonet(selectionState)
+})
+density_contours.addEventListener('input', function(e) {
+  console.log('asdf')
+  updateStereonet(selectionState)
+})
+mean_plane.addEventListener('input', function(e) {
+  console.log('asdf')
+  updateStereonet(selectionState)
+})
+
+
+
+/**
+ * state JSON <-> DOM subroutines
+ */
+
+// read measurements multi-select DOM as JSON
+function getMeasurements() /* : {[name: string]: {[id: number]: 1}} */ {
+  var newState = {}
+  Array.from(measurements.selectedOptions).forEach(function(opt) {
+    var value = opt.value.split(':')
+    var locName = value[0], measurementId = value[1]
+    if (!newState[locName]) newState[locName] = {}
+    newState[locName][measurementId] = 1
+  })
+  return newState
+}
+
+// update both multi-selects' DOM to match given JSON state
+function setState(newState /* : {[name: string]: {[id: number]: 1}} */) {
+  selectionState = newState
+
+  // select localities options
+  for (var i = 0; i < locs.options.length; i += 1) {
+    locs.options[i].selected = locs.options[i].value in newState
+  }
+
+  // redraw measurements options
+  var html = ''
+  for (var name in newState) {
+    var selectedMs = newState[name] // : {[id: number]: 1}, selected measurements
+    var measOpts = MEASUREMENT_OPTIONS[name] // : Array<{ id: string, label: string, type: string }>
+    for (var j = 0; j < measOpts.length; j += 1) {
+      var m = measOpts[j]
+      html += '<option value="' + m.id + '"' + (selectedMs[j] ? ' selected' : '') + '>' + m.label + '</option>'
+    }
+  }
+  measurements.innerHTML = html
+
+  // redraw measurement types controls
+  updateMeasurementTypes(newState)
+
+  // redraw stereonet
+  updateStereonet(newState)
+}
+
+// update measurement types controls
+function updateMeasurementTypes(newState) {
+  var measTypes = {} // : {[type: string]: number}
+  var selTypes = {} // : {[type: string]: number}
+  for (var name in newState) {
+    var selectedMs = newState[name] // : {[id: number]: 1}, selected measurements
+    var measOpts = MEASUREMENT_OPTIONS[name] // : Array<{ id: string, label: string, type: string }>
+    for (var j = 0; j < measOpts.length; j += 1) {
+      var m = measOpts[j]
+      if (!measTypes[m.type]) measTypes[m.type] = 1
+      else measTypes[m.type] += 1
+      if (selectedMs[j]) {
+        if (!selTypes[m.type]) selTypes[m.type] = 1
+        else selTypes[m.type] += 1
+      }
+    }
+  }
+
+  measurement_types.innerHTML = ''
+  Object.keys(measTypes).sort().forEach(function(type) {
+    var checkbox = document.createElement('input')
+    checkbox.type = 'checkbox'
+    checkbox.value = type
+    if (selTypes[type] > 0) {
+      checkbox.checked = true
+      if (selTypes[type] < measTypes[type]) {
+        checkbox.indeterminate = true
+      }
+    }
+    var label = document.createElement('label')
+    label.innerHTML = ' ' + type + ' '
+    label.insertBefore(checkbox, label.firstChild)
+    measurement_types.appendChild(label)
+    measurement_types.appendChild(document.createElement('br'))
+  })
+}
+
+// update stereonet to given JSON state
+var loading = false, queued
+function updateStereonet(newState /* : {[name: string]: {[id: number]: 1}} */) {
+  var params = []
+  for (var name in newState) {
+    params.push(name + ':' + Object.keys(newState[name]).join(','))
+  }
+  var url = '/stereonet.svg?server_epoch={{ server_epoch }}&measurements=' + params.join('/')
+  if (!poles_only.checked) {
+    url += '&planes=true'
+  }
+  if (density_contours.checked) {
+    url += '&density_contours=true'
+  }
+  if (mean_plane.checked) {
+    url += '&mean_plane=true'
+  }
+  if (loading) {
+    queued = url
+  } else {
+    stereonet.src = url
+    if (!stereonet.complete) {
+      stereonet.className = 'loading'
+      loading = true
+    }
+  }
+}
+
+// remove loading indicator whenever stereonet finishes loading;
+// this is here rather than with event handlers because it's
+// conceptually like `await`-ing the load event
+stereonet.addEventListener('load', function() {
+  if (queued) {
+    stereonet.src = queued
+    queued = undefined
+  } else {
+    stereonet.className = ''
+    loading = false
+  }
+})
+</script>
